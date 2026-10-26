@@ -23,6 +23,21 @@ from cloud import REQUIRED, Cloud
 from signing import CLOUD_KEY, car_key, sign
 from validator import validate
 
+# Try loading environment variables from .env file if it exists
+if os.path.exists(".env"):
+    try:
+        with open(".env", "r") as _f:
+            for _line in _f:
+                _line = _line.strip()
+                if _line and not _line.startswith("#") and "=" in _line:
+                    _k, _v = _line.split("=", 1)
+                    _k = _k.strip()
+                    _v = _v.strip().strip("'\"")
+                    if _k in ("GEMINI_API_KEY", "GOOGLE_API_KEY"):
+                        os.environ.setdefault(_k, _v)
+    except Exception:
+        pass
+
 st.set_page_config(page_title="ImmuneFleet", page_icon="🛡️", layout="wide")
 
 N_CARS = 5
@@ -651,8 +666,14 @@ st.button("✕ Close settings" if S.show_settings else "⚙️ Demo settings", k
 with st.container(key="setpanel"):
     st.markdown("<div class='sp-title'>Demo settings</div>", unsafe_allow_html=True)
     st.checkbox("Use real LLM for the AI step", key="use_llm", help="Needs the google-genai package and GEMINI_API_KEY.")
-    if S.get("use_llm") and not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
-        st.warning("GEMINI_API_KEY is not set; the demo will fall back to the local extractor.")
+    if S.get("use_llm"):
+        _cur_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or ""
+        _key_in = st.text_input("Paste Gemini API Key", value=_cur_key, type="password", key="gemini_key_input",
+                                help="Get a free key from Google AI Studio (aistudio.google.com)")
+        if _key_in:
+            os.environ["GEMINI_API_KEY"] = _key_in
+        elif not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
+            st.warning("GEMINI_API_KEY is not set; the demo will fall back to the local extractor.")
     st.checkbox("Fast response: 1 report makes a provisional alert-only antibody", key="fast_response", value=False,
                 help="Off = the original behavior: nothing happens fleet-wide until 3 cars report.")
     st.checkbox("Make the AI misbehave (leak GPS/VIN)", key="misbehave", help="Shows the validator stripping private fields.")
