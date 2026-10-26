@@ -5,7 +5,7 @@ import time
 
 import streamlit as st
 
-from car import heuristic_extract, llm_extract, make_log
+from car import heuristic_extract, llm_extract, make_log, redact_log
 from cloud import REQUIRED, Cloud
 from signing import CLOUD_KEY, car_key, sign
 from validator import validate
@@ -59,7 +59,7 @@ def apply_rollout_stage():
 
 def init_state():
     st.session_state.cars = {
-        i: {"status": "healthy", "note": "", "raw": None, "draft": None, "rule": None, "stripped": []}
+        i: {"status": "healthy", "note": "", "raw": None, "redacted": None, "draft": None, "rule": None, "stripped": []}
         for i in range(1, N_CARS + 1)
     }
     st.session_state.cloud = Cloud(on_deploy=on_deploy, on_release=on_release,
@@ -92,13 +92,14 @@ def attack(car_id):
         cloud.log(f"🔵 Car {car_id}: attack blocked instantly by the deployed antibody")
         return
     lines = make_log(car_id)
+    redacted = redact_log(lines)
     try:
-        draft = llm_extract(lines) if S.get("use_llm") else heuristic_extract(lines, S.get("misbehave", False))
+        draft = llm_extract(redacted) if S.get("use_llm") else heuristic_extract(redacted, S.get("misbehave", False))
     except Exception as e:  # never let the demo die on stage
         cloud.log(f"⚠️ LLM call failed ({type(e).__name__}: {str(e)[:80]}); using local extractor")
-        draft = heuristic_extract(lines, S.get("misbehave", False))
+        draft = heuristic_extract(redacted, S.get("misbehave", False))
     rule, stripped, reason = validate(draft)
-    c.update(status="compromised", note="Under attack", raw=lines, draft=draft, rule=rule, stripped=stripped)
+    c.update(status="compromised", note="Under attack", raw=lines, redacted=redacted, draft=draft, rule=rule, stripped=stripped)
     cloud.log(f"🔴 Car {car_id} attacked; AI drafted {json.dumps(draft)}")
     if stripped:
         cloud.log(f"🛡️ Validator stripped private fields from Car {car_id}: {', '.join(stripped)}")
@@ -202,9 +203,15 @@ with left:
         c = S.cars[cid]
         rl, rr = st.columns(2)
         with rl:
-            st.markdown(f"**Car {cid}: raw log (stays on the car)**")
-            st.code("\n".join(c["raw"][:12]) + "\n...", language="text")
-            st.caption("Contains GPS, speed and VIN on every line.")
+            st.markdown(f"**Car {cid}: CAN Log**")
+            log_tab1, log_tab2 = st.tabs(["Raw log (stays on car)", "🔒 Redacted for AI (Layer 1)"])
+            with log_tab1:
+                st.code("\n".join(c["raw"][:12]) + "\n...", language="text")
+                st.caption("Contains GPS, speed and VIN on every line.")
+            with log_tab2:
+                if c.get("redacted"):
+                    st.code("\n".join(c["redacted"][:12]) + "\n...", language="text")
+                    st.caption("Stripped down to relative frame, ID & data. Model never sees GPS, speed, or VIN.")
         with rr:
             st.markdown("**AI draft → validator → sent**")
             st.caption("AI draft")

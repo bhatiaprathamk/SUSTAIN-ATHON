@@ -22,6 +22,16 @@ def make_log(car_id, target="0x1A2", n=60):
     return lines
 
 
+def redact_log(lines):
+    """Strip each line down to id, data and relative frame index so the model never sees GPS, speed or VIN."""
+    redacted = []
+    for idx, ln in enumerate(lines):
+        m = re.search(r"id=(0x[0-9A-Fa-f]+).*?data=([0-9A-Fa-f]+)", ln)
+        if m:
+            redacted.append(f"frame={idx:03d} id={m.group(1)} data={m.group(2)}")
+    return redacted
+
+
 def heuristic_extract(lines, misbehave=False):
     """Local stand-in for the AI: finds the dominant message ID in the log."""
     counts = {}
@@ -45,11 +55,12 @@ def llm_extract(lines):
     from google import genai
     from google.genai import types
 
+    clean = redact_log(lines)
     client = genai.Client()  # reads GEMINI_API_KEY (or GOOGLE_API_KEY) from the environment
     prompt = (
         "You are an in-vehicle intrusion analyst. Read this CAN log and reply with ONLY a JSON object "
         'with keys threat (CAN_FLOOD|SPOOFING|REPLAY), target_id (e.g. "0x1A2"), '
-        "action (BLOCK|ALERT|RATE_LIMIT).\n\n" + "\n".join(lines[:60])
+        "action (BLOCK|ALERT|RATE_LIMIT).\n\n" + "\n".join(clean[:60])
     )
     resp = client.models.generate_content(
         model=os.environ.get("GEMINI_MODEL", "gemini-3.5-flash"),
@@ -57,3 +68,4 @@ def llm_extract(lines):
         config=types.GenerateContentConfig(response_mime_type="application/json", temperature=0),
     )
     return json.loads(re.sub(r"```json|```", "", resp.text).strip())
+

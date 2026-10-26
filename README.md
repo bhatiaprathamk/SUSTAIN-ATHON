@@ -14,8 +14,8 @@ The rule format has no field for location, speed, VIN or time.
 
 ## How it works
 
-1. **Extract (on the car):** a small AI model reads the messy attack log and drafts a rule.
-2. **Validate (privacy guard):** a strict allowlist (`validator.py`) strips any extra field and rejects invalid rules. Privacy depends on this short, checkable code, not on the AI behaving.
+1. **Redact & Extract (on the car):** logs are redacted to strip GPS, speed, and VIN down to a relative frame index, message ID, and payload data *before* the AI sees them (**Privacy Layer 1**). A small AI model then reads the clean frames and drafts a rule.
+2. **Validate (privacy guard):** a strict allowlist (`validator.py`) strips any extra or hallucinated fields and rejects invalid rules (**Privacy Layer 2**). Privacy depends on short, checkable deterministic code, not on the AI behaving.
 3. **Sign and send:** the car signs the rule with its own device key.
 4. **Fast response (1 report):** the reporting car applies its own rule instantly (it is its own car, so no trust is needed). The cloud also shares an **ALERT-only** version with the fleet, so other cars get a warning within seconds. A single report can never cause a hard BLOCK, and never reaches safety-critical IDs (braking, steering). If nobody corroborates it, it is withdrawn.
 5. **Consensus (3 reports):** a hard rule needs **3 distinct signed cars** reporting the same `threat + target_id`. Rules stuck below 3 expire and are deleted.
