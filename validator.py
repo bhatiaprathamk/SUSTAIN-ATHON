@@ -5,7 +5,7 @@ stripped, and a rule with an invalid field is rejected outright.
 """
 import re
 
-THREATS = {"CAN_FLOOD", "SPOOFING", "REPLAY"}
+THREATS = {"CAN_FLOOD", "SPOOFING", "REPLAY", "MALWARE_VIRUS", "TROJAN_INJECT"}
 ACTIONS = {"BLOCK", "ALERT", "RATE_LIMIT"}
 ALLOWED_KEYS = {"threat", "target_id", "action"}
 ID_RE = re.compile(r"^0x[0-9A-Fa-f]{1,3}$")

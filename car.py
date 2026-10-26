@@ -22,6 +22,65 @@ def make_log(car_id, target="0x1A2", n=60):
     return lines
 
 
+VIRUS_PROFILES = {
+    "CAN-Worm.Apex": {
+        "threat": "MALWARE_VIRUS",
+        "target_id": "0x1A2",
+        "desc": "Infiltrates vehicle gateway to inject high-frequency malicious packets",
+    },
+    "GhostBrake.Trojan": {
+        "threat": "TROJAN_INJECT",
+        "target_id": "0x1E4",
+        "desc": "Trojan horse targeting brake assist communication frames",
+    },
+    "BatteryDrainer.ZeroDay": {
+        "threat": "MALWARE_VIRUS",
+        "target_id": "0x3D1",
+        "desc": "Zero-day payload hijacking battery management compute",
+    },
+}
+
+
+def make_virus_dump(car_id, virus_name="CAN-Worm.Apex"):
+    """Simulates a virus infection dump on the car, containing virus telemetry mixed with private driver data."""
+    profile = VIRUS_PROFILES.get(virus_name, VIRUS_PROFILES["CAN-Worm.Apex"])
+    vin = f"5YJ3E1EA{car_id}KF{random.randint(100000, 999999)}"
+    lat, lon = 12.9716 + random.random() / 50, 77.5946 + random.random() / 50
+    return {
+        "virus_name": virus_name,
+        "threat": profile["threat"],
+        "target_id": profile["target_id"],
+        "behavior": profile["desc"],
+        # Sensitive vehicle telematics that must be removed by AI:
+        "gps": f"({lat:.5f}, {lon:.5f})",
+        "speed": f"{random.randint(35, 80)} km/h",
+        "vin": vin,
+        "driver_route": "Private Residence -> Downtown Office",
+    }
+
+
+def ai_sanitize_and_synthesize_antibody(virus_dump):
+    """The AI agent analyzes the virus, scrubs all private data (GPS, VIN, speed), and synthesizes an antibody rule."""
+    sensitive_keys = [k for k in ("gps", "speed", "vin", "driver_route") if k in virus_dump]
+    
+    # AI isolates the virus mechanism
+    clean_virus_info = {
+        "virus_name": virus_dump["virus_name"],
+        "threat": virus_dump["threat"],
+        "target_id": virus_dump["target_id"],
+        "behavior": virus_dump["behavior"],
+    }
+    
+    # AI synthesizes the antibody rule
+    antibody = {
+        "threat": virus_dump["threat"],
+        "target_id": virus_dump["target_id"],
+        "action": "BLOCK",
+    }
+    return clean_virus_info, sensitive_keys, antibody
+
+
+
 def redact_log(lines):
     """Strip each line down to id, data and relative frame index so the model never sees GPS, speed or VIN."""
     redacted = []

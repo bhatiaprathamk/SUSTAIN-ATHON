@@ -5,7 +5,15 @@ import time
 
 import streamlit as st
 
-from car import heuristic_extract, llm_extract, make_log, redact_log
+from car import (
+    VIRUS_PROFILES,
+    ai_sanitize_and_synthesize_antibody,
+    heuristic_extract,
+    llm_extract,
+    make_log,
+    make_virus_dump,
+    redact_log,
+)
 from cloud import REQUIRED, Cloud
 from signing import CLOUD_KEY, car_key, sign
 from validator import validate
@@ -67,6 +75,7 @@ def init_state():
     st.session_state.last_car = None
     st.session_state.rollout = None
     st.session_state.demo_step = None  # None = not playing
+    st.session_state.virus_event = None
 
 
 if "cars" not in st.session_state:
@@ -110,6 +119,53 @@ def attack(car_id):
         c.update(status="contained", note="Local antibody applied instantly")
         cloud.log(f"🟠 Car {car_id}: attack contained by its own local antibody")
     send(car_id, rule)
+
+
+def inject_virus(car_id, virus_name):
+    c, cloud = S.cars[car_id], S.cloud
+    S.last_car = car_id
+    target_id = VIRUS_PROFILES[virus_name]["target_id"]
+
+    # Check if this car is already immunized against this virus
+    if cloud.has_antibody_for(target_id) and c["status"] in ("immune", "blocked"):
+        c["status"], c["note"] = "blocked", f"VIRUS BLOCKED — IMMUNE ({virus_name})"
+        cloud.log(f"🛡️ Car {car_id}: {virus_name} blocked on arrival! Protected by fleet vaccine.")
+        st.toast(f"Car {car_id} is immune to {virus_name}!", icon="🛡️")
+        return
+
+    # 1. Virus enters car and triggers error/telemetry dump
+    raw_dump = make_virus_dump(car_id, virus_name)
+    c.update(status="compromised", note=f"Infected by {virus_name}")
+    cloud.log(f"🦠 Car {car_id} infected by virus '{virus_name}' targeting CAN ID {target_id}")
+
+    # 2. AI agent on the car cleans private telematics (GPS, speed, VIN, route)
+    clean_info, sensitive_purged, antibody_draft = ai_sanitize_and_synthesize_antibody(raw_dump)
+    cloud.log(f"🤖 AI Agent on Car {car_id} stripped private telematics: {', '.join(sensitive_purged)}")
+
+    # 3. Privacy validator allowlist guarantees clean rule
+    rule, stripped, reason = validate(antibody_draft)
+
+    # 4. Generate simulated CAN bus log for vehicle display
+    lines = make_log(car_id, target=target_id)
+    redacted = redact_log(lines)
+    c.update(raw=lines, redacted=redacted, draft=antibody_draft, rule=rule, stripped=stripped + sensitive_purged)
+
+    # 5. Save event details for UI visualization
+    S.virus_event = {
+        "car_id": car_id,
+        "virus_name": virus_name,
+        "raw_dump": raw_dump,
+        "clean_info": clean_info,
+        "purged": sensitive_purged,
+        "antibody": rule,
+    }
+
+    # 6. Car applies local defense instantly
+    c.update(status="contained", note="Virus contained by local antibody")
+    cloud.log(f"🟠 Car {car_id}: local antibody applied to neutralize {virus_name}")
+
+    # 7. Cloud signs and deploys vaccine across all other EV cars
+    cloud.deploy_vaccine(rule)
 
 
 def healthy_cars():
@@ -189,6 +245,44 @@ b1, b2, b3 = st.columns(3)
 b1.button("☠️ Poison: one car sends a fake rule", on_click=poison, use_container_width=True)
 b2.button("⚠️ Bad rule: blocks emergency braking", on_click=bad_rule, use_container_width=True)
 b3.button("⌛ Let time pass (expire stuck rules)", on_click=expire, use_container_width=True)
+
+st.write("")
+st.subheader("🦠 EV Virus & Fleet Vaccine Lab")
+st.caption("Inject a virus into an EV. The onboard AI agent inspects the malware, strips all driver PII (GPS, speed, VIN), synthesizes an antibody, and immunizes the entire EV fleet.")
+
+vcol1, vcol2, vcol3 = st.columns([2.5, 1.2, 1.8])
+with vcol1:
+    sel_virus = st.selectbox(
+        "Select Virus Strain",
+        list(VIRUS_PROFILES.keys()),
+        key="virus_choice",
+        format_func=lambda v: f"{v} (Target: {VIRUS_PROFILES[v]['target_id']})",
+    )
+    st.caption(f"**Behavior:** {VIRUS_PROFILES[sel_virus]['desc']}")
+with vcol2:
+    target_car = st.selectbox("Target Car", list(S.cars.keys()), key="target_car_choice")
+with vcol3:
+    st.write("")
+    st.button(f"🦠 Inject {sel_virus} into Car {target_car}", on_click=inject_virus, args=(target_car, sel_virus), use_container_width=True)
+
+if S.get("virus_event"):
+    ve = S.virus_event
+    with st.expander(f"🔬 Live Virus Analysis: {ve['virus_name']} (Infected Car {ve['car_id']})", expanded=True):
+        ec1, ec2, ec3 = st.columns(3)
+        with ec1:
+            st.markdown("**1. Raw Virus Telemetry Dump**")
+            st.json(ve["raw_dump"])
+            st.caption("Contains malware payload mixed with private GPS, speed, route, and VIN.")
+        with ec2:
+            st.markdown("**2. AI Agent Sanitization & Learning**")
+            st.error("🚨 Stripped Sensitive Driver PII:\n- " + "\n- ".join(ve["purged"]))
+            st.markdown("**Clean Virus Mechanism:**")
+            st.json(ve["clean_info"])
+        with ec3:
+            st.markdown("**3. Synthesized Fleet Vaccine (Antibody)**")
+            st.success("✅ Clean Signed Antibody:")
+            st.json(ve["antibody"])
+            st.caption("Signed by Cloud ➔ Broadcasted ➔ All other EV cars are now immune!")
 
 left, right = st.columns([3, 2])
 

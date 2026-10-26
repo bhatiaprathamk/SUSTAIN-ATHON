@@ -41,6 +41,17 @@ class Cloud:
     def has_antibody_for(self, target_id):
         return any(d["rule"]["target_id"] == target_id for d in self.deployed.values())
 
+    def deploy_vaccine(self, rule):
+        """Immediately deploys a verified virus vaccine antibody across all EV fleet vehicles."""
+        k = rule_key(rule)
+        self.pending.pop(k, None)
+        self.provisional.pop(k, None)
+        sig = sign(CLOUD_KEY, rule)
+        self.deployed[k] = {"rule": rule, "sig": sig}
+        self.log(f"💉 FLEET VACCINE ACTIVE: Antibody deployed to all cars ({json.dumps(rule)})")
+        if self.on_deploy:
+            self.on_deploy(rule, sig)
+
     def receive(self, car_id, rule, sig):
         if sig != sign(car_key(car_id), rule):
             self.log(f"☁️ Rejected report from Car {car_id}: bad signature")
