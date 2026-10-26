@@ -1,6 +1,7 @@
 """ImmuneFleet demo UI (Streamlit). Logic lives in car.py, validator.py, cloud.py, signing.py."""
 import json
 import os
+import re
 import time
 
 import streamlit as st
@@ -24,6 +25,26 @@ N_CARS = 5
 ATTACK_TARGET = "0x1A2"
 STAGE_SIZES = [1, 3, N_CARS]  # canary cars, then half the fleet, then everyone
 STEP_DELAY = 1.2
+
+
+def format_raw_log_lines(raw_lines, max_lines=8):
+    """Parses raw CAN log strings into clean, structured dictionaries for tabular presentation."""
+    parsed = []
+    for idx, ln in enumerate(raw_lines[:max_lines]):
+        m_id = re.search(r"id=(0x[0-9A-Fa-f]+)", ln)
+        m_data = re.search(r"data=([0-9A-Fa-f]+)", ln)
+        m_gps = re.search(r"gps=(\([^)]+\))", ln)
+        m_spd = re.search(r"speed=([0-9]+kmh)", ln)
+        m_vin = re.search(r"vin=([0-9A-Za-z]+)", ln)
+        parsed.append({
+            "Frame": f"#{idx:02d}",
+            "CAN ID": m_id.group(1) if m_id else "N/A",
+            "Payload Data": m_data.group(1) if m_data else "N/A",
+            "📍 GPS (Private)": m_gps.group(1) if m_gps else "N/A",
+            "⚡ Speed (Private)": m_spd.group(1) if m_spd else "N/A",
+            "🏷️ VIN (Private)": m_vin.group(1) if m_vin else "N/A",
+        })
+    return parsed
 
 
 # ---------------------------------------------------------------- state
@@ -208,7 +229,14 @@ def start_demo():
 
 # ---------------------------------------------------------------- UI
 st.title("🛡️ ImmuneFleet")
-st.caption("Cars share antibodies, not data. A tiny validated rule leaves the car; the raw log never does.")
+st.caption("Cars share antibodies, not data. A tiny validated micro-rule leaves the car; the raw log never does.")
+
+# Metric KPIs
+m1, m2, m3, m4 = st.columns(4)
+m1.metric("Connected Fleet", f"{N_CARS} EVs")
+m2.metric("Telemetry Privacy", "100% Onboard", delta="Zero PII Egress")
+m3.metric("Consensus Threshold", f"{REQUIRED} Distinct Cars")
+m4.metric("Active Antibodies", f"{len(S.cloud.deployed)} Deployed")
 
 with st.sidebar:
     st.header("Demo settings")
@@ -241,33 +269,118 @@ for i, col in zip(S.cars, st.columns(N_CARS)):
     col.button(f"Attack Car {i}", key=f"atk{i}", on_click=attack, args=(i,), use_container_width=True)
 
 st.write("")
-b1, b2, b3 = st.columns(3)
-b1.button("☠️ Poison: one car sends a fake rule", on_click=poison, use_container_width=True)
-b2.button("⚠️ Bad rule: blocks emergency braking", on_click=bad_rule, use_container_width=True)
-b3.button("⌛ Let time pass (expire stuck rules)", on_click=expire, use_container_width=True)
+b1, b2, b3, b4 = st.columns(4)
+b1.button("☠️ Poison: fake rule", on_click=poison, use_container_width=True)
+b2.button("⚠️ Bad rule: brake block", on_click=bad_rule, use_container_width=True)
+b3.button("⌛ Let time pass (expire)", on_click=expire, use_container_width=True)
+b4.button("🔁 Reset demo", on_click=init_state, use_container_width=True)
 
 st.write("")
-st.subheader("🦠 EV Virus & Fleet Vaccine Lab")
-st.caption("Inject a virus into an EV. The onboard AI agent inspects the malware, strips all driver PII (GPS, speed, VIN), synthesizes an antibody, and immunizes the entire EV fleet.")
+left, right = st.columns([1.5, 1.0])
 
-vcol1, vcol2, vcol3 = st.columns([2.5, 1.2, 1.8])
-with vcol1:
-    sel_virus = st.selectbox(
-        "Select Virus Strain",
-        list(VIRUS_PROFILES.keys()),
-        key="virus_choice",
-        format_func=lambda v: f"{v} (Target: {VIRUS_PROFILES[v]['target_id']})",
+with left:
+    cid = S.last_car if S.last_car and S.cars[S.last_car]["raw"] else next(
+        (i for i, c in S.cars.items() if c["raw"]), None
     )
-    st.caption(f"**Behavior:** {VIRUS_PROFILES[sel_virus]['desc']}")
-with vcol2:
-    target_car = st.selectbox("Target Car", list(S.cars.keys()), key="target_car_choice")
-with vcol3:
-    st.write("")
-    st.button(f"🦠 Inject {sel_virus} into Car {target_car}", on_click=inject_virus, args=(target_car, sel_virus), use_container_width=True)
+    st.subheader(f"🔍 Vehicle Privacy Pipeline {'(Car ' + str(cid) + ')' if cid else ''}")
+    if cid is None:
+        st.info("👆 Click **'Attack Car 1'** above to trigger an attack and inspect the 3-layer privacy pipeline.")
+    else:
+        c = S.cars[cid]
+        tab_raw, tab_layer1, tab_layer2 = st.tabs([
+            "🔴 1. Raw Telemetry (Exposes PII)",
+            "🔒 2. Privacy Layer 1 (Redacted for AI)",
+            "🛡️ 3. Privacy Layer 2 (Validator & Sent Rule)"
+        ])
+        
+        with tab_raw:
+            st.error("🚨 SENSITIVE DATA EXPOSURE: This raw CAN log resides on the vehicle's ECU. Every frame exposes exact GPS coordinates, speed, and VIN. Sharing this with third parties or the cloud violates driver privacy.")
+            raw_table = format_raw_log_lines(c["raw"], max_lines=8)
+            st.dataframe(raw_table, use_container_width=True, hide_index=True)
+            st.caption(f"Showing 8 of {len(c['raw'])} captured CAN frames. Stored strictly on Car {cid}; never transmitted.")
 
-if S.get("virus_event"):
-    ve = S.virus_event
-    with st.expander(f"🔬 Live Virus Analysis: {ve['virus_name']} (Infected Car {ve['car_id']})", expanded=True):
+        with tab_layer1:
+            st.info("🔒 PRE-INFERENCE REDACTION: Before passing data to the onboard AI model, each line is stripped down strictly to its relative frame index, CAN ID, and data payload. The model prompt never contains GPS, speed, or VIN.")
+            if c.get("redacted"):
+                st.code("\n".join(c["redacted"][:8]) + "\n...", language="text")
+            st.success("✅ Context Window Scrubbed: 0 GPS coordinates | 0 Speed values | 0 VIN numbers")
+
+        with tab_layer2:
+            st.success("🛡️ DETERMINISTIC SCHEMA VALIDATION: Privacy does not rely on the AI behaving. A hardcoded allowlist checks the output. Any unknown or leaked fields are stripped, and invalid rules are dropped.")
+            c1, c2 = st.columns(2)
+            with c1:
+                st.markdown("**AI Draft Output:**")
+                st.json(c["draft"])
+                if c["stripped"]:
+                    st.error(f"🚨 Stripped by validator: {', '.join(c['stripped'])}")
+            with c2:
+                st.markdown("**Final Transmitted Rule (Signed):**")
+                if c["rule"]:
+                    st.json(c["rule"])
+                    st.caption(f"🔏 Cryptographic Signature: `HMAC-SHA256 (car-{cid}-device-secret)`")
+                else:
+                    st.error("Rule rejected by validator. Nothing was sent.")
+
+with right:
+    st.subheader("☁️ Cloud Defense & Consensus")
+    cloud = S.cloud
+    
+    # 1. Consensus Tracker
+    st.markdown("##### 🤝 Fleet Consensus Tracker")
+    if not cloud.pending and not cloud.deployed:
+        st.info("No active attack reports. Waiting for vehicle reports.")
+    for k, e in cloud.pending.items():
+        n = len(e["reports"])
+        st.markdown(f"**Target:** `{k}` — **{n}/{REQUIRED} Cars Corroborated**")
+        st.progress(n / REQUIRED)
+        st.caption(f"Signatures from: {', '.join(['Car ' + str(r_cid) for r_cid in e['reports']])}")
+        
+    for k, d in cloud.provisional.items():
+        st.warning(f"🟡 PROVISIONAL `{k}`: ALERT-only warning active.")
+        
+    # 2. Peer Testing Sandbox
+    st.markdown("##### 🧪 Peer Testing Sandbox")
+    if cloud.last_test:
+        t = cloud.last_test
+        if t["verdict"] == "PASS":
+            st.success(f"**Peer Test Result:** `{t['key']}` ➔ **PASS**\n\n{t['why']}")
+        elif t["verdict"] == "DOWNGRADE":
+            st.warning(f"**Peer Test Result:** `{t['key']}` ➔ **DOWNGRADE**\n\n{t['why']}")
+        else:
+            st.error(f"**Peer Test Result:** `{t['key']}` ➔ **FAIL**\n\n{t['why']}")
+    else:
+        st.caption("Sandbox automatically tests rules against emergency braking and driving replays before rollout.")
+        
+    # 3. Deployed Antibodies
+    st.markdown("##### 🛡️ Deployed Fleet Antibodies")
+    if cloud.deployed:
+        for k, d in cloud.deployed.items():
+            st.success(f"**Antibody `{k}` Active**\n- Action: `{d['rule']['action']}`\n- Cloud Sig: `{d['sig']}`")
+    else:
+        st.caption("No antibodies deployed yet.")
+
+st.write("")
+tab_virus, tab_events = st.tabs(["🦠 Zero-Day EV Virus & Fleet Vaccine Lab", "📜 Real-Time Fleet Event Log"])
+
+with tab_virus:
+    st.caption("Inject a zero-day virus into an EV. The onboard AI agent inspects the malware, strips all driver PII (GPS, speed, VIN), synthesizes an antibody, and immunizes the entire EV fleet.")
+    vcol1, vcol2, vcol3 = st.columns([2.5, 1.2, 1.8])
+    with vcol1:
+        sel_virus = st.selectbox(
+            "Select Virus Strain",
+            list(VIRUS_PROFILES.keys()),
+            key="virus_choice",
+            format_func=lambda v: f"{v} (Target: {VIRUS_PROFILES[v]['target_id']})",
+        )
+        st.caption(f"**Behavior:** {VIRUS_PROFILES[sel_virus]['desc']}")
+    with vcol2:
+        target_car = st.selectbox("Target Car", list(S.cars.keys()), key="target_car_choice")
+    with vcol3:
+        st.write("")
+        st.button(f"🦠 Inject {sel_virus} into Car {target_car}", on_click=inject_virus, args=(target_car, sel_virus), use_container_width=True)
+
+    if S.get("virus_event"):
+        ve = S.virus_event
         ec1, ec2, ec3 = st.columns(3)
         with ec1:
             st.markdown("**1. Raw Virus Telemetry Dump**")
@@ -284,62 +397,9 @@ if S.get("virus_event"):
             st.json(ve["antibody"])
             st.caption("Signed by Cloud ➔ Broadcasted ➔ All other EV cars are now immune!")
 
-left, right = st.columns([3, 2])
-
-with left:
-    st.subheader("Raw log vs. what is sent")
-    cid = S.last_car if S.last_car and S.cars[S.last_car]["raw"] else next(
-        (i for i, c in S.cars.items() if c["raw"]), None
-    )
-    if cid is None:
-        st.info("Attack a car to see the raw log and the tiny rule that leaves it.")
-    else:
-        c = S.cars[cid]
-        rl, rr = st.columns(2)
-        with rl:
-            st.markdown(f"**Car {cid}: CAN Log**")
-            log_tab1, log_tab2 = st.tabs(["Raw log (stays on car)", "🔒 Redacted for AI (Layer 1)"])
-            with log_tab1:
-                st.code("\n".join(c["raw"][:12]) + "\n...", language="text")
-                st.caption("Contains GPS, speed and VIN on every line.")
-            with log_tab2:
-                if c.get("redacted"):
-                    st.code("\n".join(c["redacted"][:12]) + "\n...", language="text")
-                    st.caption("Stripped down to relative frame, ID & data. Model never sees GPS, speed, or VIN.")
-        with rr:
-            st.markdown("**AI draft → validator → sent**")
-            st.caption("AI draft")
-            st.json(c["draft"])
-            if c["stripped"]:
-                st.error("Stripped by validator: " + ", ".join(c["stripped"]))
-            if c["rule"]:
-                st.caption("Sent to the cloud (signed)")
-                st.json(c["rule"])
-            else:
-                st.error("Rule rejected by validator. Nothing was sent.")
-
-with right:
-    st.subheader("☁️ Cloud")
-    cloud = S.cloud
-    if not cloud.pending and not cloud.deployed:
-        st.write("No rules yet.")
-    for k, e in cloud.pending.items():
-        n = len(e["reports"])
-        st.markdown(f"**Pending `{k}`**: {n}/{REQUIRED}")
-        st.progress(n / REQUIRED)
-    for k, d in cloud.provisional.items():
-        st.warning(f"PROVISIONAL `{k}` → ALERT only, until {REQUIRED} cars corroborate")
-    for k, d in cloud.deployed.items():
-        st.success(f"DEPLOYED `{k}` → {d['rule']['action']}  (cloud sig `{d['sig']}`)")
-    if cloud.last_test:
-        t = cloud.last_test
-        (st.success if t["verdict"] == "PASS" else st.warning if t["verdict"] == "DOWNGRADE" else st.error)(
-            f"Peer test {t['key']}: **{t['verdict']}**. {t['why']}"
-        )
-
-st.subheader("Event log")
-for e in S.cloud.events[:15]:
-    st.write(e)
+with tab_events:
+    for e in S.cloud.events[:20]:
+        st.write(e)
 
 
 # ---------------------------------------------------------------- driver (rollout stages and auto-play)
