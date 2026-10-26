@@ -115,7 +115,8 @@ def llm_extract(lines):
     from google.genai import types
 
     clean = redact_log(lines)
-    client = genai.Client()  # reads GEMINI_API_KEY (or GOOGLE_API_KEY) from the environment
+    key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    client = genai.Client(api_key=key) if key else genai.Client()
     prompt = (
         "You are an in-vehicle intrusion analyst. Read this CAN log and reply with ONLY a JSON object "
         'with keys threat (CAN_FLOOD|SPOOFING|REPLAY), target_id (e.g. "0x1A2"), '
