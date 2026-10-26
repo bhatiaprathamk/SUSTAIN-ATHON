@@ -33,7 +33,7 @@ class Cloud:
         self.on_provisional = on_provisional          # called with (alert_rule, sig) on a first report
         self.on_provisional_end = on_provisional_end  # called when a provisional alert is withdrawn
         self.provisional = {}         # key -> {"rule": ALERT-only version, "sig": ...}
-        self.fast_response = True     # one report triggers a provisional, alert-only antibody
+        self.fast_response = False    # off by default to strictly demonstrate 3-car consensus
 
     def log(self, msg):
         self.events.insert(0, msg)

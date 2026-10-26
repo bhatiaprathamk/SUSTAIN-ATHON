@@ -85,7 +85,7 @@ S = st.session_state
 
 # ---------------------------------------------------------------- callbacks
 def send(car_id, rule):
-    S.cloud.fast_response = S.get("fast_response", True)
+    S.cloud.fast_response = S.get("fast_response", False)
     S.cloud.receive(car_id, rule, sign(car_key(car_id), rule))
 
 
@@ -215,7 +215,7 @@ with st.sidebar:
     st.checkbox("Use real LLM for the AI step", key="use_llm", help="Needs the google-genai package and GEMINI_API_KEY.")
     if S.get("use_llm") and not (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")):
         st.warning("GEMINI_API_KEY is not set; the demo will fall back to the local extractor.")
-    st.checkbox("Fast response: 1 report makes a provisional alert-only antibody", key="fast_response", value=True,
+    st.checkbox("Fast response: 1 report makes a provisional alert-only antibody", key="fast_response", value=False,
                 help="Off = the original behavior: nothing happens fleet-wide until 3 cars report.")
     st.checkbox("Make the AI misbehave (leak GPS/VIN)", key="misbehave", help="Shows the validator stripping private fields.")
     st.divider()
